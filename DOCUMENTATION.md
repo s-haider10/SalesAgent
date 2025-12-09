@@ -556,10 +556,7 @@ After call ends, frontend automatically calls `/api/feedback`:
 
 ### Future Improvements
 
-- **Caching**: Cache common LLM responses
-- **Adaptive latency**: Adjust based on network conditions
-- **Multi-turn optimization**: Batch processing for faster responses
-- **Analytics**: Track latency metrics, success rates
+- **Personas**: Custom personas
 
 ---
 
