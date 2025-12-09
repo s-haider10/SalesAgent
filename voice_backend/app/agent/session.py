@@ -33,10 +33,11 @@ class AgentSession:
         # Outbound streaming callbacks
         self._on_token: Optional[Callable[[str], Awaitable[None]]] = None
         self._on_audio_chunk: Optional[Callable[[bytes], Awaitable[None]]] = None
-        self._on_segment_done: Optional[Callable[[], Awaitable[None]]] = None
+        self._on_segment_done: Optional[Callable[[bool], Awaitable[None]]] = None
         self._on_audio_start: Optional[Callable[[], Awaitable[None]]] = None
         self._on_turn_done: Optional[Callable[[], Awaitable[None]]] = None
         self._on_vad: Optional[Callable[[dict], Awaitable[None]]] = None
+        self._on_hangup: Optional[Callable[[], Awaitable[None]]] = None
 
         self._last_final_ms = 0.0
         self._debounce_ms = 220.0
@@ -46,10 +47,11 @@ class AgentSession:
         on_asr_final: Optional[Callable[[str], Awaitable[None]]] = None,
         on_token: Optional[Callable[[str], Awaitable[None]]] = None,
         on_audio_chunk: Optional[Callable[[bytes], Awaitable[None]]] = None,
-        on_segment_done: Optional[Callable[[], Awaitable[None]]] = None,
+        on_segment_done: Optional[Callable[[bool], Awaitable[None]]] = None,
         on_audio_start: Optional[Callable[[], Awaitable[None]]] = None,
         on_turn_done: Optional[Callable[[], Awaitable[None]]] = None,
         on_vad: Optional[Callable[[dict], Awaitable[None]]] = None,
+        on_hangup: Optional[Callable[[], Awaitable[None]]] = None,
     ):
         self._on_token = on_token
         self._on_audio_chunk = on_audio_chunk
@@ -57,6 +59,7 @@ class AgentSession:
         self._on_audio_start = on_audio_start
         self._on_turn_done = on_turn_done
         self._on_vad = on_vad
+        self._on_hangup = on_hangup
 
         async def on_vad_inner(evt: dict):
             if self._on_vad:
@@ -144,8 +147,10 @@ class AgentSession:
 
         seg_q: asyncio.Queue[Optional[str]] = asyncio.Queue()
         reply_parts: list[str] = []
+        hangup_detected_in_stream = False
 
         async def segment_writer():
+            nonlocal hangup_detected_in_stream
             buf: list[str] = []
             char_budget = 250
             t0 = time.perf_counter()
@@ -157,8 +162,14 @@ class AgentSession:
                         continue
 
                     reply_parts.append(tok)
+                    # Log if we see HANGUP-related content
+                    if "HANGUP" in tok.upper() or "[" in tok:
+                        logger.debug("[session] Token contains HANGUP or [: %s", repr(tok))
+                    
                     if self._on_token:
-                        await self._on_token(tok)
+                        # Don't send [HANGUP] token to frontend
+                        if "[HANGUP]" not in tok:
+                            await self._on_token(tok)
 
                     if first_tok_at is None:
                         first_tok_at = time.perf_counter()
@@ -166,13 +177,64 @@ class AgentSession:
 
                     buf.append(tok)
                     s = "".join(buf)
-                    if len(s) >= char_budget or self._PUNCT.search(s):
-                        await seg_q.put(s.strip())
+                    
+                    # Check if [HANGUP] appears in accumulated text (case-insensitive check too)
+                    hangup_patterns = ["[HANGUP]", "[hangup]", "[Hangup]"]
+                    hangup_found = False
+                    hangup_index = -1
+                    for pattern in hangup_patterns:
+                        if pattern in s:
+                            hangup_found = True
+                            hangup_index = s.find(pattern)
+                            logger.info("[session] Detected %s in accumulated text at index %d", pattern, hangup_index)
+                            break
+                    
+                    if hangup_found and not hangup_detected_in_stream:
+                        hangup_detected_in_stream = True
+                        closing_seg = s[:hangup_index].strip()
+                        if closing_seg:
+                            # Send closing segment with is_final=True flag
+                            await seg_q.put((closing_seg, True))
+                            logger.info("[session] Hangup detected in stream, sending closing segment with is_final=True: %s", repr(closing_seg))
+                        else:
+                            # No closing phrase, just [HANGUP] - send empty final segment to trigger hangup
+                            await seg_q.put(("", True))
+                            logger.info("[session] Hangup detected with no closing phrase, sending empty final segment")
                         buf.clear()
+                        # Stop processing further tokens after hangup
+                        break
+                    
+                    if len(s) >= char_budget or self._PUNCT.search(s):
+                        # Filter out [HANGUP] if it appears in segment
+                        seg_text = s.strip()
+                        is_final = False
+                        if "[HANGUP]" in seg_text:
+                            hangup_index = seg_text.find("[HANGUP]")
+                            seg_text = seg_text[:hangup_index].strip()
+                            hangup_detected_in_stream = True
+                            is_final = True
+                        if seg_text:
+                            await seg_q.put((seg_text, is_final))
+                        buf.clear()
+                        if hangup_detected_in_stream:
+                            break
 
-                tail = "".join(buf).strip()
-                if tail:
-                    await seg_q.put(tail)
+                if not hangup_detected_in_stream:
+                    tail = "".join(buf).strip()
+                    if tail:
+                        # Filter out [HANGUP] from tail if present
+                        is_final = False
+                        if "[HANGUP]" in tail:
+                            hangup_index = tail.find("[HANGUP]")
+                            tail = tail[:hangup_index].strip()
+                            hangup_detected_in_stream = True
+                            is_final = True
+                        if tail:
+                            await seg_q.put((tail, is_final))
+                        elif is_final:
+                            # No text but hangup detected - send empty final segment
+                            await seg_q.put(("", True))
+                            logger.info("[session] Hangup in tail with no text, sending empty final segment")
             except asyncio.CancelledError:
                 logger.debug("[llm] streaming cancelled (barge-in)")
                 raise
@@ -180,14 +242,33 @@ class AgentSession:
                 await seg_q.put(None)
 
         async def tts_consumer():
+            is_final_segment = False
             try:
                 while True:
                     seg = await seg_q.get()
                     if seg is None:
                         break
+                    # Check if this is a tuple with (text, is_final) or just text
+                    if isinstance(seg, tuple):
+                        seg_text, is_final_segment = seg
+                    else:
+                        seg_text = seg
+                        is_final_segment = False
+                    
+                    # If empty text but final segment, skip TTS but still signal completion
+                    if not seg_text and is_final_segment:
+                        logger.info("[session] Empty final segment, skipping TTS but signaling completion")
+                        if self._on_segment_done:
+                            await self._on_segment_done(is_final=True)
+                        continue
+                    
+                    # Skip empty segments
+                    if not seg_text:
+                        continue
+                    
                     got_audio = False
                     t1 = time.perf_counter()
-                    async for audio in self._tts.synthesize(seg):
+                    async for audio in self._tts.synthesize(seg_text):
                         if not audio:
                             continue
                         if not got_audio:
@@ -198,7 +279,9 @@ class AgentSession:
                         if self._on_audio_chunk:
                             await self._on_audio_chunk(audio)
                     if self._on_segment_done:
-                        await self._on_segment_done()
+                        await self._on_segment_done(is_final=is_final_segment)
+                        if is_final_segment:
+                            logger.info("[session] Final segment completed, sent is_final=True")
             except asyncio.CancelledError:
                 logger.debug("[tts] synthesis cancelled (barge-in)")
                 # Drain seg_q if cancelled
@@ -212,14 +295,52 @@ class AgentSession:
 
             # Only append ASSISTANT if the turn completed successfully
             reply_text = "".join(reply_parts).strip()
-            if reply_text:
+            logger.debug("[session] Full reply text received: %s", repr(reply_text))
+            
+            # Check for hangup keyword (either detected during stream or in final text)
+            # Check case-insensitively for robustness
+            hangup_patterns = ["[HANGUP]", "[hangup]", "[Hangup]"]
+            hangup_in_text = False
+            hangup_index = -1
+            for pattern in hangup_patterns:
+                if pattern in reply_text:
+                    hangup_in_text = True
+                    hangup_index = reply_text.find(pattern)
+                    logger.info("[session] Found %s in final reply text at index %d", pattern, hangup_index)
+                    break
+            
+            hangup_detected = hangup_detected_in_stream or hangup_in_text
+            closing_phrase = reply_text
+            
+            if hangup_detected:
+                # Extract closing phrase (text before [HANGUP])
+                if hangup_in_text and hangup_index >= 0:
+                    closing_phrase = reply_text[:hangup_index].strip()
+                logger.info("[session] Hangup detected! Reply text: %s, Closing phrase: %s", reply_text, closing_phrase)
+                
+                # NOTE: We do NOT trigger hangup callback here
+                # The hangup will be triggered by on_segment_done(is_final=True) 
+                # after the final audio segment completes TTS synthesis
+                logger.info("[session] Hangup will be triggered after final segment completes TTS")
+                
+                # Store only the closing phrase in history (without [HANGUP])
+                if closing_phrase:
+                    async with self._hist_lock:
+                        self._history.append({"role": "assistant", "content": closing_phrase})
+                        if len(self._history) > self._max_history_msgs:
+                            self._history = self._history[-self._max_history_msgs :]
+
+                if self._on_turn_done:
+                    await self._on_turn_done()
+            elif reply_text:
+                # Normal response, store as usual
                 async with self._hist_lock:
                     self._history.append({"role": "assistant", "content": reply_text})
                     if len(self._history) > self._max_history_msgs:
                         self._history = self._history[-self._max_history_msgs :]
 
-            if self._on_turn_done:
-                await self._on_turn_done()
+                if self._on_turn_done:
+                    await self._on_turn_done()
 
         except asyncio.CancelledError:
             logger.info("[session] response generation cancelled due to barge-in.")

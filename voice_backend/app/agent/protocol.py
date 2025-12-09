@@ -35,6 +35,7 @@ class LlmTokenEvent(BaseModel):
 
 class SegmentDoneEvent(BaseModel):
     type: Literal["segment_done"] = "segment_done"
+    is_final: bool = False
 
 
 class TurnDoneEvent(BaseModel):
@@ -47,3 +48,8 @@ class DoneEvent(BaseModel):
 
 class AudioStartEvent(BaseModel):
     type: Literal["audio_start"] = "audio_start"
+
+
+class HangupEvent(BaseModel):
+    type: Literal["hangup"] = "hangup"
+    reason: Optional[str] = None
