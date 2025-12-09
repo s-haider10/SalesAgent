@@ -2,6 +2,12 @@
 
 AI-powered sales call practice platform with real-time voice interaction and automated feedback analysis.
 
+
+## Demo 
+
+[![Watch the video](https://img.shields.io/badge/Watch_Video-Google_Drive-red?style=for-the-badge&logo=google-drive)](https://drive.google.com/file/d/1T61FBOwIvCGYb47GYpBrIMqxxi7MsQZ3/view?usp=sharing)
+
+
 ## Features
 
 - **Real-time Voice Conversation**: Practice sales calls with AI personas (Joe - Director of Ops, Sam - CEO)
