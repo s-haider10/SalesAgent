@@ -10,9 +10,9 @@ AI-powered sales call practice platform with real-time voice interaction and aut
 
 
 ## Features
-
+- **Cost**: $0.3/hr
 - **Real-time Voice Conversation**: Practice sales calls with AI personas (Joe - Director of Ops, Sam - CEO)
-- **Low-Latency Pipeline**: ASR → LLM → TTS with streaming and barge-in support
+- **Low-Latency Pipeline**: ASR → LLM → TTS with streaming and barge-in support (~600ms)
 - **Automated Feedback**: Post-call analysis with 9 evaluation criteria
 - **Microsoft AI-Inspired UI**: Warm, approachable design with elegant typography
 
@@ -66,9 +66,6 @@ Frontend (React) ←→ WebSocket ←→ Backend (FastAPI)
               ├── BasetenChat (LLM)
               └── InworldTTS (TTS)
 ```
-
-## Cost 
-~ $0.3 / hr 
 
 See [DOCUMENTATION.md](DOCUMENTATION.md) for detailed system design and workflow.
 
