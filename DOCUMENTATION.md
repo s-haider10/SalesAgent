@@ -218,7 +218,7 @@ Frontend: Receives DoneEvent
 **API**: OpenAI-compatible (Baseten inference endpoint)  
 **Configuration**:
 
-- `temperature=0.2` (deterministic, focused responses)
+- `temperature=0.8` (balanced responses)
 - `max_tokens=256` (concise responses)
 - `stream=True` (token-by-token streaming)
 
@@ -245,7 +245,7 @@ CORE_INSTRUCTIONS (role, formatting, hangup protocol)
 
 **Technology**: Inworld AI TTS API  
 **Sample Rate**: 48kHz, mono  
-**Voice**: Olivia (configurable)  
+**Voice**: Mark (configurable)  
 **Features**:
 
 - Streaming audio synthesis
