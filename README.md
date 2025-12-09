@@ -6,6 +6,7 @@ AI-powered sales call practice platform with real-time voice interaction and aut
 ## Demo 
 
 [![Watch the video](https://img.shields.io/badge/Watch_Video-Google_Drive-red?style=for-the-badge&logo=google-drive)](https://drive.google.com/file/d/1T61FBOwIvCGYb47GYpBrIMqxxi7MsQZ3/view?usp=sharing)
+[![Watch the video](https://github.com/s-haider10/SalesAgent/blob/main/home.png)](https://drive.google.com/file/d/1T61FBOwIvCGYb47GYpBrIMqxxi7MsQZ3/view?usp=sharing)
 
 
 ## Features
