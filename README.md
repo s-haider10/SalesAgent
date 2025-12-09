@@ -46,7 +46,7 @@ Visit `http://localhost:5173` (Vite dev server proxies `/api` to backend on port
 - **Backend**: FastAPI, WebSockets, asyncio
 - **Frontend**: React, TypeScript, Vite, AudioWorklet
 - **ASR**: Fennec (streaming, VAD-enabled)
-- **LLM**: Baseten (Llama-4-Scout-17B)
+- **LLM**: Baseten (deepseek-ai/DeepSeek-V3.2)
 - **TTS**: Inworld AI (streaming, 48kHz)
 
 ## Architecture
@@ -59,6 +59,9 @@ Frontend (React) ←→ WebSocket ←→ Backend (FastAPI)
               ├── BasetenChat (LLM)
               └── InworldTTS (TTS)
 ```
+
+## Cost 
+~ $0.3 / hr 
 
 See [DOCUMENTATION.md](DOCUMENTATION.md) for detailed system design and workflow.
 
